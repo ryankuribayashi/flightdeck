@@ -1,0 +1,60 @@
+name: Deploy web demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # No Supabase env vars set on purpose: lib/supabase.ts falls back to
+      # placeholder credentials whenever they're undefined, which keeps the
+      # deployed site in Demo Mode. Add EXPO_PUBLIC_SUPABASE_URL /
+      # EXPO_PUBLIC_SUPABASE_ANON_KEY as repo secrets (and reference them
+      # here) if you ever want the live site backed by a real Supabase project.
+      - name: Export web build
+        run: npx expo export --platform web
+
+      # GitHub Pages runs Jekyll by default, which ignores files/folders
+      # starting with an underscore (like Expo's _expo/ output dir).
+      - name: Disable Jekyll
+        run: touch dist/.nojekyll
+
+      # Client-side routing fallback: unmatched paths (e.g. a deep link or
+      # a hard refresh on /dossier) get served index.html instead of a 404.
+      - name: Add SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
